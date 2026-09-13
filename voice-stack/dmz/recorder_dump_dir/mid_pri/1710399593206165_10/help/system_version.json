@@ -1,0 +1,56 @@
+{
+    "name": "Lbcar-V3.2.7-sw040rp41_CR_IMProduct_v6.8_26-20230711.187.tgz",
+    "uuid": "f599c5672731fe9d409a8d80d29943b7",
+    "version": "V3.2.7",
+    "car_info": {
+        "project": "tianmashan",
+        "car_type": "Lbcar",
+        "data_source_env": "SOP"
+    },
+    "suffix": "sw040rp41_CR_IMProduct_v6.8_26",
+    "cuda_version": "",
+    "maf_interface": "7110f42N-7a39e192-5431dc7aca630bea",
+    "os_name": "Linux",
+    "branch": "sop/lbcar/v3.2.7",
+    "commit_id": "ba75aeee44d54afa00b047b31012fc753bfd2bf6",
+    "timestamp": 1689080129,
+    "timestamp_human": "2023/07/11 20:55:29",
+    "timestamp_beijing": "2023/07/11 20:55:29",
+    "mf_system": {
+        "version": {
+            "version": "1.0.7",
+            "git_branch": "sop/lbcar/v3.2.7",
+            "git_commit_hash": "ba75aeee",
+            "git_commit_date": "2023/07/11 20:21:54",
+            "git_commit_count": "1"
+        },
+        "args": [
+            "api/pipeline.py",
+            "-c",
+            "config/Lbcar/system_CR_IMProduct_toC.yaml",
+            "--in-ci",
+            "1",
+            "--disable-hooks",
+            "1",
+            "-o",
+            "/root/workspace/modules_cache",
+            "-d",
+            "1",
+            "--build-number",
+            "20230711.187",
+            "--suffix",
+            "sw040rp41_CR_IMProduct_v6.8_26",
+            "--create-deploy-archive",
+            "true",
+            "--deploy-archive-export-dir",
+            "ci_output_2_strip",
+            "--deduplicate-files",
+            "true",
+            "--strip-binaries",
+            "true"
+        ],
+        "envs": {
+            "CONAN_ERROR_ON_OVERRIDE": "True"
+        }
+    }
+}

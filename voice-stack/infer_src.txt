@@ -1,0 +1,260 @@
+===== F5TTS.infer =====
+    def infer(
+        self,
+        ref_file,
+        ref_text,
+        gen_text,
+        show_info=print,
+        progress=tqdm,
+        target_rms=0.1,
+        cross_fade_duration=0.15,
+        sway_sampling_coef=-1,
+        cfg_strength=2,
+        nfe_step=32,
+        speed=1.0,
+        fix_duration=None,
+        remove_silence=False,
+        file_wave=None,
+        file_spec=None,
+        seed=None,
+    ):
+        if seed is None:
+            seed = random.randint(0, sys.maxsize)
+        seed_everything(seed)
+        self.seed = seed
+
+        ref_file, ref_text = preprocess_ref_audio_text(ref_file, ref_text, show_info=show_info)
+
+        wav, sr, spec = infer_process(
+            ref_file,
+            ref_text,
+            gen_text,
+            self.ema_model,
+            self.vocoder,
+            self.mel_spec_type,
+            show_info=show_info,
+            progress=progress,
+            target_rms=target_rms,
+            cross_fade_duration=cross_fade_duration,
+            nfe_step=nfe_step,
+            cfg_strength=cfg_strength,
+            sway_sampling_coef=sway_sampling_coef,
+            speed=speed,
+            fix_duration=fix_duration,
+            device=self.device,
+        )
+
+        if file_wave is not None:
+            self.export_wav(wav, file_wave, remove_silence)
+
+        if file_spec is not None:
+            self.export_spectrogram(spec, file_spec)
+
+        return wav, sr, spec
+
+
+===== infer_batch_process =====
+def infer_batch_process(
+    ref_audio,
+    ref_text,
+    gen_text_batches,
+    model_obj,
+    vocoder,
+    mel_spec_type="vocos",
+    progress=tqdm,
+    target_rms=0.1,
+    cross_fade_duration=0.15,
+    nfe_step=32,
+    cfg_strength=2.0,
+    sway_sampling_coef=-1,
+    speed=1,
+    fix_duration=None,
+    device=None,
+    streaming=False,
+    chunk_size=2048,
+):
+    audio, sr = ref_audio
+    if audio.shape[0] > 1:
+        audio = torch.mean(audio, dim=0, keepdim=True)
+
+    rms = torch.sqrt(torch.mean(torch.square(audio)))
+    if rms < target_rms:
+        audio = audio * target_rms / rms
+    if sr != target_sample_rate:
+        audio_np = audio.squeeze().numpy() if audio.shape[0] == 1 else audio.numpy()
+        audio_np = librosa.resample(audio_np, orig_sr=sr, target_sr=target_sample_rate)
+        audio = torch.from_numpy(audio_np).float()
+        if audio.ndim == 1:
+            audio = audio.unsqueeze(0)
+        sr = target_sample_rate
+    audio = audio.to(device)
+
+    generated_waves = []
+    spectrograms = []
+
+    if len(ref_text[-1].encode("utf-8")) == 1:
+        ref_text = ref_text + " "
+
+    # Allocate fix_duration across chunks to avoid each chunk using the full-sentence duration (N× blow-up)
+    if fix_duration is not None and len(gen_text_batches) > 1:
+        ref_audio_len_frames = audio.shape[-1] // hop_length
+        ref_sec = ref_audio_len_frames * hop_length / target_sample_rate
+        target_total = fix_duration - ref_sec
+        weights = [len(c.encode("utf-8")) for c in gen_text_batches]
+        total_w = sum(weights)
+        allocatable = target_total + cross_fade_duration * (len(gen_text_batches) - 1)
+        fix_durations = [ref_sec + allocatable * w / total_w for w in weights]
+    else:
+        fix_durations = [fix_duration] * len(gen_text_batches)
+
+    def _infer_basic(gen_text, fix_dur):
+        local_speed = speed
+        if len(gen_text.encode("utf-8")) < 10:
+            local_speed = 0.3
+
+        # Prepare the text
+        text_list = [ref_text + gen_text]
+        final_text_list = convert_char_to_pinyin(text_list)
+
+        ref_audio_len = audio.shape[-1] // hop_length
+        if fix_dur is not None:
+            duration = int(fix_dur * target_sample_rate / hop_length)
+        else:
+            # Calculate duration
+            ref_text_len = len(ref_text.encode("utf-8"))
+            gen_text_len = len(gen_text.encode("utf-8"))
+            duration = ref_audio_len + int(ref_audio_len / ref_text_len * gen_text_len / local_speed)
+
+        # inference
+        with torch.inference_mode():
+            generated, _ = model_obj.sample(
+                cond=audio,
+                text=final_text_list,
+                duration=duration,
+                steps=nfe_step,
+                cfg_strength=cfg_strength,
+                sway_sampling_coef=sway_sampling_coef,
+            )
+            del _
+
+            generated = generated.to(torch.float32)  # generated mel spectrogram
+            generated = generated[:, ref_audio_len:, :]
+            generated = generated.permute(0, 2, 1)
+            if mel_spec_type == "vocos":
+                generated_wave = vocoder.decode(generated)
+            elif mel_spec_type == "bigvgan":
+                generated_wave = vocoder(generated)
+            if rms < target_rms:
+                generated_wave = generated_wave * rms / target_rms
+
+            # wav -> numpy
+            generated_wave = generated_wave.squeeze().cpu().numpy()
+
+        return generated_wave, generated
+
+    def infer_single_process(gen_text, fix_dur):
+        generated_wave, generated = _infer_basic(gen_text, fix_dur)
+        generated_cpu = generated[0].cpu().numpy()
+        del generated
+        return generated_wave, generated_cpu
+
+    def infer_single_process_streaming(gen_text, fix_dur):
+        # for src/f5_tts/socket_server.py
+        generated_wave, generated = _infer_basic(gen_text, fix_dur)
+        del generated
+        for j in range(0, len(generated_wave), chunk_size):
+            yield generated_wave[j : j + chunk_size], target_sample_rate
+
+    if streaming:
+        batches_iter = progress.tqdm(gen_text_batches) if progress is not None else gen_text_batches
+        for gen_text, fix_dur in zip(batches_iter, fix_durations):
+            for chunk in infer_single_process_streaming(gen_text, fix_dur):
+                yield chunk
+    else:
+        with ThreadPoolExecutor() as executor:
+            futures = [executor.submit(infer_single_process, gt, fd) for gt, fd in zip(gen_text_batches, fix_durations)]
+            for future in progress.tqdm(futures) if progress is not None else futures:
+                result = future.result()
+                if result:
+                    generated_wave, generated_mel_spec = result
+                    generated_waves.append(generated_wave)
+                    spectrograms.append(generated_mel_spec)
+
+        if generated_waves:
+            if cross_fade_duration <= 0:
+                # Simply concatenate
+                final_wave = np.concatenate(generated_waves)
+            else:
+                # Combine all generated waves with cross-fading
+                final_wave = generated_waves[0]
+                for i in range(1, len(generated_waves)):
+                    prev_wave = final_wave
+                    next_wave = generated_waves[i]
+
+                    # Calculate cross-fade samples, ensuring it does not exceed wave lengths
+                    cross_fade_samples = int(cross_fade_duration * target_sample_rate)
+                    cross_fade_samples = min(cross_fade_samples, len(prev_wave), len(next_wave))
+
+                    if cross_fade_samples <= 0:
+                        # No overlap possible, concatenate
+                        final_wave = np.concatenate([prev_wave, next_wave])
+                        continue
+
+                    # Overlapping parts
+                    prev_overlap = prev_wave[-cross_fade_samples:]
+                    next_overlap = next_wave[:cross_fade_samples]
+
+                    # Fade out and fade in
+                    fade_out = np.linspace(1, 0, cross_fade_samples)
+                    fade_in = np.linspace(0, 1, cross_fade_samples)
+
+                    # Cross-faded overlap
+                    cross_faded_overlap = prev_overlap * fade_out + next_overlap * fade_in
+
+                    # Combine
+                    new_wave = np.concatenate(
+                        [prev_wave[:-cross_fade_samples], cross_faded_overlap, next_wave[cross_fade_samples:]]
+                    )
+
+                    final_wave = new_wave
+
+            # Create a combined spectrogram
+            combined_spectrogram = np.concatenate(spectrograms, axis=1)
+
+            yield final_wave, target_sample_rate, combined_spectrogram
+
+        else:
+            yield None, target_sample_rate, None
+
+
+===== chunk_text =====
+def chunk_text(text, max_chars=135):
+    """
+    Splits the input text into chunks, each with a maximum number of characters.
+
+    Args:
+        text (str): The text to be split.
+        max_chars (int): The maximum number of characters per chunk.
+
+    Returns:
+        List[str]: A list of text chunks.
+    """
+    chunks = []
+    current_chunk = ""
+    # Split the text into sentences based on punctuation followed by whitespace
+    sentences = re.split(r"(?<=[;:,.!?])\s+|(?<=[；：，。！？])", text)
+
+    for sentence in sentences:
+        if not sentence:
+            continue
+        if len(current_chunk.encode("utf-8")) + len(sentence.encode("utf-8")) <= max_chars:
+            current_chunk += sentence + " " if sentence and len(sentence[-1].encode("utf-8")) == 1 else sentence
+        else:
+            if current_chunk:
+                chunks.append(current_chunk.strip())
+            current_chunk = sentence + " " if sentence and len(sentence[-1].encode("utf-8")) == 1 else sentence
+
+    if current_chunk:
+        chunks.append(current_chunk.strip())
+
+    return chunks

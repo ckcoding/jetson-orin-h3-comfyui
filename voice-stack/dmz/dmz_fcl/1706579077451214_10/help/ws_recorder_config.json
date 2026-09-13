@@ -1,0 +1,68 @@
+{
+  "entry_size_KB": 3072,
+  "max_entry_num": 12,
+  "min_cache_sec": 35,
+  "ccs_client_id": 1,
+  "max_log_size_KB": 5120,
+  "dump_root_dir": "/opt/m/dmz/recorder_dump_dir",
+  "camera_data_type": "h264",
+  "camera_with_header": false,
+
+  "logger": {
+    "level": "info",
+    "file": "${LOG_CONFIG_DIR}/dmz_recorder_forever.log",
+    "file_type": "write",
+    "max_buffer_size_KB": 0,
+    "enable_stderr": false,
+    "enable_background_dump": false,
+    "export_frequence": 0,
+    "tag": "dmz_recorder"
+  },
+
+  "h264_image_list": [
+    "/sensor/camera_front_fisheye/video",
+    "/sensor/camera_right_fisheye/video",
+    "/sensor/camera_rear_fisheye/video",
+    "/sensor/camera_left_fisheye/video",
+    "/sensor/camera_front_wide/video",
+    "/sensor/camera_front_far/video",
+    "/sensor/camera_right_rear/video",
+    "/sensor/camera_left_rear/video",
+    "/sensor/camera_right_front/video",
+    "/sensor/camera_left_front/video",
+    "/sensor/camera_rear_mid/video"
+  ],
+
+  "lidar_topic_list": [
+    "/sensor/lidar_ml/multi_scan",
+    "/sensor/lidar_mr/multi_scan"
+  ],
+
+  "maf_topic_list": [
+    {
+      "topic":"/mff_rte/filter/ldpmonitor",
+      "queue_size": 20
+    },
+    {
+      "topic":"/vehicle/chassis_report",
+      "queue_size": 20
+    },
+    {
+      "topic":"/vin",
+      "queue_size": 10
+    }
+  ],
+
+  "ecc_channel_list": [
+    "ecc-vehicle_service",
+    "ecc-sensor_service-radar_gps",
+    "ecc-sensor_service-imu",
+    "ecc-sensor_service-uss",
+    "ecc-sensor_service-uss_pld",
+    "ecc-mff",
+    "ecc-mff_2",
+    "ecc-mff_3",
+    "ecc-controller",
+    "ecc-mff_eol"
+  ]
+}
