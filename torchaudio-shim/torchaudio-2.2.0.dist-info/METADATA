@@ -1,0 +1,6 @@
+Metadata-Version: 2.1
+Name: torchaudio
+Version: 2.2.0
+Summary: Pure-torch shim replacing the ABI-incompatible torchaudio 2.2.0 wheel (custom torch 2.2.0 ARM64 build)
+Home-page: local
+Requires-Python: >=3.10

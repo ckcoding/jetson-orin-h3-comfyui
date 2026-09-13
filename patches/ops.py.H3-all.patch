@@ -1,0 +1,93 @@
+--- comfy/ops.py.bak-pih3-oom	2026-09-13 09:39:43.180545000 +0000
++++ comfy/ops.py	2026-09-13 10:49:46.572545000 +0000
+@@ -53,11 +53,64 @@
+         v = v.repeat_interleave(n_rep, dim=head_dim)
+     return k, v
+ 
++def _h3_chunked_sdpa(q, k, v, attn_mask=None, dropout_p=0.0, is_causal=False, scale=None):
++    # Memory-bounded exact SDPA: softmax over keys is per-query-row, so chunking
++    # the query dim is mathematically identical to full attention.
++    B, H, Sq, D = q.shape
++    Sk = k.shape[-2]
++    elem = q.element_size()
++    budget = int(3e8)  # ~300MB per score chunk
++    chunk = max(64, min(Sq, budget // max(1, (B * H * Sk * elem))))
++    out = torch.empty_like(q)
++    neg = torch.finfo(q.dtype).min
++    s_scale = scale if scale is not None else (1.0 / (D ** 0.5))
++    add_mask = None
++    if attn_mask is not None and attn_mask.dtype.is_floating_point:
++        add_mask = attn_mask.to(q.dtype)
++    bool_mask = attn_mask if (attn_mask is not None and attn_mask.dtype == torch.bool) else None
++    for i in range(0, Sq, chunk):
++        j = min(i + chunk, Sq)
++        qi = q[:, :, i:j, :]
++        # fp32 attention math: bf16 softmax over long keys loses too much precision
++        s = torch.matmul(qi.float(), k.float().transpose(-1, -2)) * s_scale
++        if add_mask is not None:
++            if add_mask.dim() == 4 and add_mask.shape[-2] == Sq:
++                s = s + add_mask[:, :, i:j, :]
++            else:
++                s = s + add_mask
++        if bool_mask is not None:
++            if bool_mask.dim() == 4 and bool_mask.shape[-2] == Sq:
++                s = s.masked_fill(~bool_mask[:, :, i:j, :], neg)
++            else:
++                s = s.masked_fill(~bool_mask, neg)
++        if is_causal:
++            r = torch.arange(i, j, device=q.device)[:, None] - torch.arange(Sk, device=q.device)[None, :]
++            s = s.masked_fill(r < 0, neg)
++        w = torch.softmax(s, dim=-1)
++        if dropout_p > 0.0:
++            w = torch.nn.functional.dropout(w, p=dropout_p)
++        out[:, :, i:j, :] = torch.matmul(w, v.float()).to(q.dtype)
++    return out
++
++
+ def scaled_dot_product_attention(q, k, v, *args, **kwargs):
+     attn_mask = args[0] if len(args) > 0 else kwargs.get("attn_mask")
+     if kwargs.get("enable_gqa", False) and attn_mask is not None:
+         k, v = repeat_kv_for_gqa(k, v, q.shape[-3], -3)
+         kwargs["enable_gqa"] = False
++    # H3 patch: coerce float attn_mask to query dtype (SDPA rejects fp32 mask vs bf16 q)
++    if attn_mask is not None and attn_mask.dtype != torch.bool and attn_mask.dtype != q.dtype and attn_mask.dtype.is_floating_point:
++        kwargs = dict(kwargs)
++        kwargs["attn_mask"] = attn_mask.to(q.dtype)
++        if len(args) > 0:
++            args = ()
++    # H3 patch: chunked attention when the score tensor would blow memory
++    Sq = q.shape[-2]
++    Sk = k.shape[-2]
++    est = Sq * Sk * q.shape[0] * q.shape[1] * q.element_size()
++    if est > 3e8:
++        return _h3_chunked_sdpa(q, k, v, attn_mask=attn_mask, dropout_p=kwargs.get("dropout_p", 0.0),
++                                is_causal=kwargs.get("is_causal", False), scale=kwargs.get("scale"))
+     return torch.nn.functional.scaled_dot_product_attention(q, k, v, *args, **kwargs)
+ 
+ 
+@@ -299,10 +352,9 @@
+         orig = x
+ 
+         def to_dequant(tensor, dtype):
+-            tensor = tensor.to(dtype=dtype)
+             if isinstance(tensor, QuantizedTensor):
+-                tensor = tensor.dequantize()
+-            return tensor
++                return tensor  # H3 OOM patch: keep quantized; layout ops dequantize per-op
++            return tensor.to(dtype=dtype)
+ 
+         if (return_weights and orig.dtype != dtype) or len(fns) > 0:
+             x = to_dequant(x, dtype)
+@@ -363,9 +415,9 @@
+         #If you are a custom node author reading this, please move your layer to the GPU
+         #or declare your ModelPatcher as CPU in the first place.
+         materialize_meta_param(s, ["weight", "bias"])
+-        weight = s.weight.to(dtype=dtype, copy=True)
+-        if isinstance(weight, QuantizedTensor):
+-            weight = weight.dequantize()
++        weight = s.weight
++        if not isinstance(weight, QuantizedTensor):
++            weight = weight.to(dtype=dtype, copy=True)  # H3 OOM patch: QTensor passes through
+         bias = s.bias.to(dtype=bias_dtype, copy=True) if s.bias is not None else None
+         return format_return((weight, bias, (None, None, None)), offloadable)
+ 
