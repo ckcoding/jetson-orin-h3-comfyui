@@ -95,3 +95,24 @@ ollama list   # → qwen38:latest  16 GB
 - 24G 统一内存：模型 14.7G + KV 2G + 系统 ~4G ≈ 贴边，ctx 别开太大；
   与 ComfyUI 同时常驻时注意内存余量
 - llama.cpp 定制旧版（0.1.2-dev）对 Qwen3.8 混合架构支持不完整，勿混用
+
+
+## 7. 延伸：Qwen3.6-35B-A3B (MoE) 的注册
+
+unsloth 官方 GGUF（UD-IQ4_XS 17.73G）实测 **31.73 tok/s**（66 层 offload，A3B 架构
+每 token 仅读 ~3G 激活权重，突破密集模型带宽墙 4.2 倍）。完整数据见 BENCHMARKS.md。
+
+要点：
+- GGUF 头解析：`general.architecture = qwen35moe`（733 tensors）
+- create 的 quantize 校验同样拒绝 → 手工注册时 `model_family` 必须填 **qwen35moe**
+- blob 用**硬链接**复用已校验文件（同分区零拷贝）：
+
+```bash
+ln /opt/update/models/Qwen3.6-35B-A3B-UD-IQ4_XS.gguf    $OLLAMA_MODELS/blobs/sha256-649d7508507b84638732c4f52c24c8b15843c6dca2f3ff793ae07c14a67ebbb3
+# config blob: model_family=qwen35moe, manifest 同第 4 节 (layer size=17730509792)
+```
+
+- 下载务必带校验：`aria2c --checksum=sha-256=<HF API tree 接口的 lfs.oid>`，
+  否则可能得到**全零空壳**（大小正确、内容全零，双端 sha256 互验无法发现）
+- 24G 内存互斥：qwen36(17.7G) 与 z-image 生成峰值(~12G) 不可同时驻留，
+  Ollama 5 分钟闲置自动卸载

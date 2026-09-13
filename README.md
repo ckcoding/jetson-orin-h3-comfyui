@@ -169,12 +169,19 @@ curl -X POST localhost:8188/prompt -H 'Content-Type: application/json' \
 - comfy_kitchen eager 纯 Python 实现性能弱于 CUDA 扩展（本设备 CUDA 扩展只能编 2 个算子，CUDA 11.4 编不了 nvfp4/fp8 系）
 - 音频质量与快速运动画面是 H3 Turbo 蒸馏的已知短板（上游问题）
 
-## 9. 延伸：Ollama JetPack5 构建运行 27B LLM（GPU 全层 offload）
+## 9. 延伸：Ollama JetPack5 构建运行 LLM（GPU 全层 offload）
 
 同一台设备上用 Ollama v0.34.0 官方 `arm64-jetpack5` 构建（CUDA 11.4 / sm_87），
-**66/66 层全量 offload** 运行 Qwen3.8-27B Q4_K_M，实测 **7.58 tok/s**（132 ms/tok）。
-关键钥匙：`JETSON_JETPACK=5` 环境变量 + 手工 manifest 绕过 quantize 校验。
-详见 **[OLLAMA-DEPLOY.md](OLLAMA-DEPLOY.md)**。
+已验证两台模型 **66/65 层全量 offload**：
+
+| 模型 | 实测速度 |
+|---|---|
+| Qwen3.8-27B Q4_K_M（密集）| 7.58 tok/s（带宽墙 81-90%，已到顶）|
+| **Qwen3.6-35B-A3B IQ4_XS（MoE）** | **31.73 tok/s**（A3B 架构突破带宽墙 4.2×）|
+
+关键钥匙：`JETSON_JETPACK=5` + 手工 manifest 绕过 quantize 校验。
+部署指南见 **[OLLAMA-DEPLOY.md](OLLAMA-DEPLOY.md)**，
+完整测速与能力对比见 **[BENCHMARKS.md](BENCHMARKS.md)**。
 
 ## 10. 致谢与参考
 
