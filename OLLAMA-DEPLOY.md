@@ -129,3 +129,10 @@ ln /opt/update/models/Qwen3.6-35B-A3B-UD-IQ4_XS.gguf    $OLLAMA_MODELS/blobs/sha
 
 ⚠️ 常驻代价：模型载入后占据 ~17G，z-image 生成前需先让位
 （`curl -d '{"model":"qwen38","keep_alive":0}'` 或 `systemctl restart ollama`）。
+
+
+## 9. ComfyUI 同样 systemd 托管（OOM 自愈）
+
+35B 模型载入时曾 OOM-kill 掉裸跑的 ComfyUI（无自愈机制）。
+`patches/comfyui.service`：`Restart=always` + `OOMScoreAdjust=-500`（OOM 时优先保护），
+`systemctl enable --now comfyui` 后被杀 10 秒自动复活。
