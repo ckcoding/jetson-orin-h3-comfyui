@@ -1,0 +1,21 @@
+[Unit]
+Description=Ollama LLM Server (Qwen3.8/3.6, JetPack5 CUDA)
+After=network.target
+
+[Service]
+Type=simple
+User=root
+Environment=HOME=/opt/update/ollama/home
+Environment=OLLAMA_MODELS=/opt/update/ollama/models
+Environment=OLLAMA_HOST=0.0.0.0:8080
+Environment=OLLAMA_KEEP_ALIVE=-1
+Environment=JETSON_JETPACK=5
+Environment=OLLAMA_LIBRARY_PATH=/opt/update/ollama/lib/ollama:/opt/update/ollama/lib/ollama/cuda_jetpack5
+Environment=LD_LIBRARY_PATH=/opt/update/ollama/lib/ollama/cuda_jetpack5:/usr/lib/aarch64-linux-gnu/tegra
+ExecStartPre=/bin/mount -o remount,exec /opt/update
+ExecStart=/opt/update/ollama/bin/ollama serve
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
