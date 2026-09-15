@@ -76,7 +76,8 @@ printf '{"schemaVersion":2,"mediaType":"application/vnd.docker.distribution.mani
   "$CFG_HASH" "$CFG_SIZE" "$MODEL_HASH" \
   > $OLLAMA_MODELS/manifests/registry.ollama.ai/library/qwen38/latest
 
-ollama list   # → qwen38:latest  16 GB
+ollama cp qwen38 qwen3.8-27b   # 建议重命名对齐真实型号
+ollama list   # → qwen3.8-27b:latest  16 GB
 ```
 
 ## 5. 实测性能（Orin iGPU，66/66 层 CUDA offload）
@@ -128,7 +129,7 @@ ln /opt/update/models/Qwen3.6-35B-A3B-UD-IQ4_XS.gguf    $OLLAMA_MODELS/blobs/sha
 - `systemctl enable --now ollama` 开机自启
 
 ⚠️ 常驻代价：模型载入后占据 ~17G，z-image 生成前需先让位
-（`curl -d '{"model":"qwen38","keep_alive":0}'` 或 `systemctl restart ollama`）。
+（`curl -d '{"model":"qwen3.8-27b","keep_alive":0}'` 或 `systemctl restart ollama`）。
 
 
 ## 9. ComfyUI 同样 systemd 托管（OOM 自愈）
