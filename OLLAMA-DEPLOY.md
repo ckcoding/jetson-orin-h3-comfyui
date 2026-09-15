@@ -137,3 +137,30 @@ ln /opt/update/models/Qwen3.6-35B-A3B-UD-IQ4_XS.gguf    $OLLAMA_MODELS/blobs/sha
 35B 模型载入时曾 OOM-kill 掉裸跑的 ComfyUI（无自愈机制）。
 `patches/comfyui.service`：`Restart=always` + `OOMScoreAdjust=-500`（OOM 时优先保护），
 `systemctl enable --now comfyui` 后被杀 10 秒自动复活。
+
+
+## 10. 激活视觉（看图）能力
+
+Qwen3.6/3.8 官方均为多模态模型，但 GGUF 只含语言部分——需要额外的
+**mmproj 视觉投影器**（独立 GGUF，约 0.9G）注册为 `projector` 层：
+
+```bash
+# mmproj 传入服务器后:
+MH=sha256-$(sha256sum mmproj-F16.gguf | cut -d' ' -f1)
+ln mmproj-F16.gguf $OLLAMA_MODELS/blobs/$MH
+# manifest.layers 追加:
+# {"mediaType":"application/vnd.ollama.image.projector","digest":"$MH","size":<文件字节数>}
+```
+
+调用（消息里带 base64 图片）:
+```json
+{"model":"qwen3.8-27b","messages":[{"role":"user","content":"描述这张图","images":["<base64>"]}]}
+```
+
+⚠️ **mmproj 必须与文本模型配对**（视觉投影输出维度 = LLM hidden size）：
+- Qwen3.8-27B（hidden 5120）→ unsloth/Qwen3.8-27B-GGUF 的 mmproj-F16 ✓
+- Qwen3.6-35B-A3B（hidden 2048）→ unsloth 仓库的 mmproj **是错配的**（5120，报
+  "mismatch n_embd 2048 vs 5120"）——用 **huihui-ai MTP 版仓库的 mmproj-model-f16** ✓
+- 错配 mmproj 会导致模型加载失败（连带文本能力一起 404），此时移除 projector 层即恢复
+
+实测：两台模型均正确识别 z-image 生成的纸鹤图（自产自检闭环 ✓）。
