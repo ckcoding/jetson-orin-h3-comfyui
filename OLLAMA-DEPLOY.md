@@ -164,3 +164,16 @@ ln mmproj-F16.gguf $OLLAMA_MODELS/blobs/$MH
 - 错配 mmproj 会导致模型加载失败（连带文本能力一起 404），此时移除 projector 层即恢复
 
 实测：两台模型均正确识别 z-image 生成的纸鹤图（自产自检闭环 ✓）。
+
+
+## 11. 平台日志降噪（GMSL 刷屏过滤）
+
+车载平台的 GMSL 相机链路驱动在未接相机时每秒刷 2 行错误（日增 ~70MB 日志），
+会淹没真实错误。驱动本身属安全平台组件**不可停**，用 rsyslog 层过滤：
+
+```bash
+# /etc/rsyslog.d/10-drop-gmsl.conf
+:msg, contains, 'GMSL Link' stop
+:msg, contains, 'max_gmsl_dp_ser' stop
+```
+`systemctl restart rsyslog` 后 kern.log 增长归零（驱动照常运行）。
